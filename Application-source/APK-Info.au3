@@ -48,7 +48,8 @@ Global $toolsDir = $ScriptDir & '\tools\'
 Global $Inidir, $ProgramVersion, $ProgramReleaseDate, $ForceGUILanguage
 Global $IniUser
 Global $tmpArrBadge, $dirAPK, $fileAPK, $fullPathAPK
-Global $sNewFilenameAPK, $searchPngCache, $hashCache
+Global $sNewFilenameAPK, $searchPngCache, $hashCache, $resourcesCache
+Global $readAllStderr = ''
 Global $progress = 0
 Global $progressMax = 1
 
@@ -1001,6 +1002,14 @@ Func _RunWait($label, $cmd)
 	Return $ret
 EndFunc   ;==>_RunWait
 
+; Like _RunWait, but kills the process if it does not finish in $timeoutSec seconds
+Func _RunWaitTimeout($label, $cmd, $timeoutSec)
+	ProgressSet(0, $label & '...')
+	$pid = Run(_FixCmd($cmd), $ScriptDir, @SW_HIDE)
+	If $pid And Not ProcessWaitClose($pid, $timeoutSec) Then ProcessClose($pid)
+	ProgressSet(100, $label & '... OK')
+EndFunc   ;==>_RunWaitTimeout
+
 Func _LoadSignature()
 	If $apk_Signature == '' Then
 		ProgressOn($strLoading & "...", $strSignature)
@@ -1015,7 +1024,7 @@ Func _getSignature($prmAPK, $load, $process = False)
 	If $load == 1 Then
 		If $process == False Then $process = _Run('apksigner', '"' & $JavaPath & 'java" -jar "' & $toolsDir & 'apksigner.jar" verify --v --print-certs "' & $prmAPK & '"', $STDERR_CHILD + $STDOUT_CHILD)
 		$output &= _readAll($process, 'apksigner stdout')
-		$output &= _readAll($process, 'apksigner stderr', False)
+		$output &= $readAllStderr
 
 		If $output == '' Or StringInStr($output, 'java.lang.UnsupportedClassVersionError') Or StringInStr($output, 'Unsupported major.minor version') Then
 			$output = $strNeedJava & @CRLF & @CRLF & $output
@@ -1057,7 +1066,7 @@ EndFunc   ;==>_getSignatureName
 Func _getBadge($prmAPK)
 	$foo = _Run('badging', '"' & $toolsDir & 'aapt" d --include-meta-data badging ' & '"' & $prmAPK & '"', $STDERR_CHILD + $STDOUT_CHILD)
 	$output = StringStripWS(_readAll($foo, 'badging'), $STR_STRIPLEADING + $STR_STRIPTRAILING)
-	If $output == '' Then $output = StringStripWS(_readAll($foo, 'badging stderr', False), $STR_STRIPLEADING + $STR_STRIPTRAILING)
+	If $output == '' Then $output = StringStripWS($readAllStderr, $STR_STRIPLEADING + $STR_STRIPTRAILING)
 	Return $output
 EndFunc   ;==>_getBadge
 
@@ -1328,38 +1337,106 @@ Func _parseLines($lines)
 	;$apk_Features = StringReplace(StringReplace(StringLower($apk_Features), "android.hardware.", ""), "android.permission.", "")
 EndFunc   ;==>_parseLines
 
+Func _loadListing()
+	If IsString($searchPngCache) Then Return
+	$foo = _Run('list', '"' & $toolsDir & 'unzip" -l ' & '"' & $fullPathAPK & '"', $STDERR_CHILD + $STDOUT_CHILD)
+	$searchPngCache = _readAll($foo, 'list')
+EndFunc   ;==>_loadListing
+
+Func _isRaster($path)
+	Return StringRegExp($path, '(?i)\.(png|webp|jpe?g)$') == 1
+EndFunc   ;==>_isRaster
+
+; size of an entry inside the APK, from "unzip -l" output, -1 if not found
+Func _entrySize($path)
+	_loadListing()
+	Local $m = StringRegExp($searchPngCache, '(?m)^\s*(\d+)\s+\S+\s+\S+\s+\Q' & $path & '\E\r?$', 1)
+	If @error Then Return -1
+	Return Int($m[0])
+EndFunc   ;==>_entrySize
+
+; Find the biggest raster image (png/webp/jpg) with the same name in all density folders
+; (res/mipmap-*/name.*, res/drawable-*/name.*). Returns $res unchanged if nothing better is found.
 Func _searchPng($res)
-	$ret = $res
+	_loadListing()
+	Local $ret = $res
+	Local $bestSize = -1
+	If _isRaster($res) Then $bestSize = _entrySize($res)
 
-	If Not $searchPngCache Then
-		$foo = _Run('list', '"' & $toolsDir & 'unzip" -l ' & '"' & $fullPathAPK & '"', $STDERR_CHILD + $STDOUT_CHILD)
-		$output = _readAll($foo, 'list')
-		$searchPngCache = _StringExplode($output, @CRLF)
-	EndIf
+	Local $dir = StringRegExpReplace($res, '^(res/[a-z]+)[-/].*$', '$1') ; 'res/mipmap' or 'res/drawable'
+	Local $name = StringRegExpReplace(_lastPart($res, "/"), '\.[^.]+$', '')
+	If $dir == $res Or $name == '' Then Return $ret ; obfuscated/shortened path (res/xY.webp) - nothing to search
 
-	$start = StringLeft($res, 10) ; 'res/mipmap' or 'res/drawab'
-	$apk_IconName = _lastPart($res, "/")
-	$end = '/' & StringLeft($apk_IconName, StringLen($apk_IconName) - 3) & 'png'
-	$bestSize = 0
-	For $line In $searchPngCache
-		$check = _StringBetween($line, $start, $end)
-		If $check <> 0 Then
-			$size = Int(StringStripWS($line, $STR_STRIPLEADING + $STR_STRIPTRAILING))
-			If $size > $bestSize Then
-				$bestSize = $size
-				$ret = $start & $check[0] & $end
+	Local $m = StringRegExp($searchPngCache, '(?m)^\s*(\d+)\s+\S+\s+\S+\s+(\Q' & $dir & '\E[^/\r\n]*/\Q' & $name & '\E\.(?i:png|webp|jpe?g))\r?$', 3)
+	If Not @error Then
+		For $i = 0 To UBound($m) - 2 Step 2
+			If Int($m[$i]) > $bestSize Then
+				$bestSize = Int($m[$i])
+				$ret = $m[$i + 1]
 			EndIf
-		EndIf
-	Next
+		Next
+	EndIf
 	Return $ret
 EndFunc   ;==>_searchPng
 
+Func _loadResources()
+	If IsString($resourcesCache) Then Return
+	$foo = _Run('resources', '"' & $toolsDir & 'aapt" d --values resources ' & '"' & $fullPathAPK & '"', $STDERR_CHILD + $STDOUT_CHILD)
+	$resourcesCache = _readAll($foo, 'resources')
+EndFunc   ;==>_loadResources
+
+; Resolve a resource id (0x7f0e0001) to a file inside the APK.
+; Returns the biggest raster file, else the first xml file, else ''.
+; If the resource is a color, it is stored in $bkgColor (when $isBg) and '' is returned.
+Func _resolveRes($id, $isBg)
+	_loadResources()
+	Local $files = StringRegExp($resourcesCache, '(?m)^\s*resource \Q' & $id & '\E [^\r\n]*\r?\n\s*\(string(?:8|16)\) "([^"\r\n]+)"', 3)
+	If Not @error Then
+		Local $best = '', $bestSize = -1, $xml = ''
+		For $file In $files
+			If _isRaster($file) Then
+				$size = _entrySize($file)
+				If $size > $bestSize Then
+					$bestSize = $size
+					$best = $file
+				EndIf
+			ElseIf $xml == '' And StringRight($file, 4) == '.xml' Then
+				$xml = $file
+			EndIf
+		Next
+		If $best <> '' Then Return $best
+		Return $xml
+	EndIf
+
+	; color: t=0x1c..0x1f
+	If $isBg Then
+		Local $color = StringRegExp($resourcesCache, '(?m)^\s*resource \Q' & $id & '\E [^\r\n]* t=0x1[c-f] d=0x([0-9a-fA-F]{8})', 1)
+		If Not @error Then $bkgColor = Dec($color[0])
+	EndIf
+	Return ''
+EndFunc   ;==>_resolveRes
+
+; Follow a drawable reference to a raster file. Handles wrappers like <inset>, <layer-list>, <bitmap>.
+; Vector drawables can not be drawn, so they give ''.
+Func _resolveDrawable($id, $isBg, $depth = 0)
+	Local $file = _resolveRes($id, $isBg)
+	If $file == '' Or _isRaster($file) Then Return $file
+	If $depth >= 2 Then Return ''
+
+	$foo = _Run('xmltree', '"' & $toolsDir & 'aapt" d xmltree ' & '"' & $fullPathAPK & '" "' & $file & '"', $STDERR_CHILD + $STDOUT_CHILD)
+	$output = _readAll($foo, 'xmltree')
+	Local $ref = StringRegExp($output, 'A: android:(?:drawable|src)\([^)]*\)=@(0x[0-9a-fA-F]+)', 1)
+	If @error Then Return ''
+	Return _resolveDrawable($ref[0], $isBg, $depth + 1)
+EndFunc   ;==>_resolveDrawable
+
+; Adaptive icon: <adaptive-icon><background/><foreground/><monochrome/></adaptive-icon>
 Func _parseXmlIcon($icon)
 	$foo = _Run('xmltree', '"' & $toolsDir & 'aapt" d xmltree ' & '"' & $fullPathAPK & '" "' & $icon & '"', $STDERR_CHILD + $STDOUT_CHILD)
 	$output = _readAll($foo, 'xmltree')
 	$arrayLines = _StringExplode($output, @CRLF)
 
-	$fg = 1
+	$fg = 1 ; plain <bitmap>/<inset> icon: its drawable is the foreground
 	Local $ids[2]
 	$ids[0] = 0
 	$ids[1] = 0
@@ -1371,61 +1448,30 @@ Func _parseXmlIcon($icon)
 			Case StringInStr($line, 'E: foreground')
 				$fg = 1
 
-			Case StringInStr($line, 'A: android:drawable')
-				$ids[$fg] = _lastPart($line, "@")
+			Case StringInStr($line, 'E: monochrome')
+				; Android 13+ themed icon layer - must not replace the foreground
+				$fg = -1
 
-			Case StringInStr($line, 'A: android:src')
-				$ids[$fg] = _lastPart($line, "@")
+			Case StringInStr($line, 'E: ')
+				; nested element (inset, bitmap...) inside a layer - keep current layer
+
+			Case StringInStr($line, 'A: android:drawable') Or StringInStr($line, 'A: android:src')
+				If $fg >= 0 And Not $ids[$fg] Then $ids[$fg] = _lastPart($line, "@")
 		EndSelect
 	Next
 
 	_setProgress(1)
 
-	If $ids[0] Or $ids[1] Then
-		$foo = _Run('resources', '"' & $toolsDir & 'aapt" d resources ' & '"' & $fullPathAPK & '"', $STDERR_CHILD + $STDOUT_CHILD)
-		$output = _readAll($foo, 'resources')
-		$arrayLines = _StringExplode($output, @CRLF)
+	Local $fgFile = '', $bgFile = ''
+	If $ids[1] Then $fgFile = _resolveDrawable($ids[1], False)
+	If $fgFile == '' Then Return False
 
-		Local $png[2]
-		$png[0] = 0
-		$png[1] = 0
-		For $line In $arrayLines
-			If StringInStr($line, 'spec resource ') Then
-				For $i = 0 To 1
-					If Not $ids[$i] Or $png[$i] Or Not StringInStr($line, $ids[$i]) Then ContinueLoop
-					$png[$i] = _StringBetween2($line, ":", ":")
-				Next
-			ElseIf $png[0] And StringLeft($png[0], 6) == 'color/' And StringInStr($line, ':' & $png[0] & ': ') And StringInStr($line, ' d=0x') Then
-				$bkgColor = Dec(_StringBetween2($line, " d=0x", " "))
-			EndIf
-		Next
-
-		If $png[0] Then
-			$apk_IconPathBg = _searchPng('res/' & $png[0] & '.png')
-		EndIf
-		If $png[1] Then
-			$apk_IconPath = _searchPng('res/' & $png[1] & '.png')
-		EndIf
-	EndIf
+	If $ids[0] Then $bgFile = _resolveDrawable($ids[0], True)
+	$apk_IconPath = $fgFile
+	If $bgFile <> '' Then $apk_IconPathBg = $bgFile
 	_setProgress(1)
+	Return True
 EndFunc   ;==>_parseXmlIcon
-
-Func _loadIcon($icon)
-	$icon = _searchPng($icon)
-
-	_setProgress(1)
-
-	Select
-		Case StringRight($icon, 4) == '.xml'
-			_parseXmlIcon($icon)
-
-		Case Else
-			_setProgress(2)
-			$apk_IconPath = $icon
-	EndSelect
-
-	_setProgress(1)
-EndFunc   ;==>_loadIcon
 
 Func _setProgress($inc)
 	$progress += $inc
@@ -1436,27 +1482,47 @@ Func _extractIcon()
 	$bkgColor = 0
 	$apk_IconPath = False
 	$apk_IconPathBg = False
+	$resourcesCache = False
 
 	$icons = _StringExplode($apk_Icons, @CRLF)
 	$progress = 0
-	$progressMax = UBound($icons) * 4
-	For $icon In $icons
-		If $apk_IconPath And StringRight($apk_IconPath, 4) == '.png' Then ExitLoop
-		_setProgress(0)
+	$progressMax = UBound($icons) + 4
 
-		_loadIcon($icon)
+	; 1. Prefer a ready raster icon (legacy png/webp), the biggest one.
+	Local $best = '', $bestSize = -1
+	For $icon In $icons
+		_setProgress(1)
+		If $icon == '' Then ContinueLoop
+		$file = _searchPng($icon)
+		If Not _isRaster($file) Then ContinueLoop
+		$size = _entrySize($file)
+		If $size > $bestSize Then
+			$bestSize = $size
+			$best = $file
+		EndIf
 	Next
+
+	If $best <> '' Then
+		$apk_IconPath = $best
+	Else
+		; 2. Adaptive icon (xml) with raster layers.
+		For $icon In $icons
+			If StringRight($icon, 4) <> '.xml' Then ContinueLoop
+			$bkgColor = 0
+			If _parseXmlIcon($icon) Then ExitLoop
+		Next
+	EndIf
+	$resourcesCache = False ; free mem
 	ProgressSet(65, $fileAPK, $strIcon & '...')
 
 	; extract icon
-	$files = $apk_IconPath
-	If $apk_IconPathBg Then
-		$files &= ' ' & $apk_IconPathBg
-	EndIf
-	$files = StringStripWS($files, $STR_STRIPLEADING + $STR_STRIPTRAILING)
+	$files = ''
+	If $apk_IconPath Then $files = '"' & $apk_IconPath & '"'
+	If $apk_IconPath And $apk_IconPathBg Then $files &= ' "' & $apk_IconPathBg & '"'
 	If $files <> '' Then
 		DirCreate($tempPath)
-		_RunWait('icons', '"' & $toolsDir & 'unzip" -o -j ' & '"' & $fullPathAPK & '" ' & $files & " -d " & '"' & $tempPath & '"')
+		; -P: never stop on a password prompt (some APKs set the "encrypted" flag as anti-tamper trick)
+		_RunWaitTimeout('icons', '"' & $toolsDir & 'unzip" -o -j -qq -P x ' & '"' & $fullPathAPK & '" ' & $files & " -d " & '"' & $tempPath & '"', 15)
 	EndIf
 EndFunc   ;==>_extractIcon
 
@@ -1509,7 +1575,7 @@ Func _drawImg($path)
 	If StringRight($filename, 5) == '.webp' Then
 		$tmpFilename = StringTrimRight($filename, 5) & '.png'
 		DirCreate($tempPath)
-		_RunWait('dwebp', '"' & $toolsDir & 'dwebp" "' & $filename & '" -o "' & $tmpFilename & '"')
+		_RunWaitTimeout('dwebp', '"' & $toolsDir & 'dwebp" "' & $filename & '" -o "' & $tmpFilename & '"', 15)
 		If FileExists($tmpFilename) Then
 			FileDelete($filename) ; no need - try delete
 			$filename = $tmpFilename
@@ -1735,19 +1801,32 @@ Func _readAll($process, $error, $stdout = True)
 	$timeout = TimerInit()
 	$timer = TimerInit()
 	$last = 0
+	$readAllStderr = ''
 	While 1
 		$time = TimerDiff($timeout)
-		If $time > $max Then ExitLoop
+		If $time > $max Then
+			ProcessClose($process) ; hung tool - do not leave it running
+			ExitLoop
+		EndIf
+		$gotErr = False
 		If $stdout Then
+			; Drain stderr too: if the tool writes many warnings to stderr and nobody reads them,
+			; the pipe fills up, the tool blocks and we wait here until the timeout.
+			$binErr = StderrRead($process, False, True)
+			If Not @error And BinaryLen($binErr) > 0 Then
+				$readAllStderr &= BinaryToString($binErr, $SB_UTF8)
+				$gotErr = True
+			EndIf
 			$bin = StdoutRead($process, False, True)
 		Else
 			$bin = StderrRead($process, False, True)
 		EndIf
 		If @error Then ExitLoop
-		If StringLen($bin) > 0 Then
+		If BinaryLen($bin) > 0 Or $gotErr Then
 			$timeout = TimerInit()
 			$output &= BinaryToString($bin, $SB_UTF8)
 		Else
+			Sleep(10) ; do not burn CPU while the tool works
 			$check = Round(TimerDiff($timer) / 500)
 			If $check <> $last Then
 				$last = $check
@@ -1755,6 +1834,14 @@ Func _readAll($process, $error, $stdout = True)
 			EndIf
 		EndIf
 	WEnd
+	If $stdout Then
+		; what is left in stderr after the tool ended
+		While 1
+			$binErr = StderrRead($process, False, True)
+			If @error Or BinaryLen($binErr) == 0 Then ExitLoop
+			$readAllStderr &= BinaryToString($binErr, $SB_UTF8)
+		WEnd
+	EndIf
 	ProgressSet(100, $error & '... OK')
 	Return $output
 EndFunc   ;==>_readAll
