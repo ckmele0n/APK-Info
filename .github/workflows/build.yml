@@ -54,6 +54,7 @@ jobs:
           if (!$root) { $root = (Resolve-Path pkg).Path }
           Copy-Item APK-Info.exe, APK-Info.ini, README.md -Destination $root -Force
           if (Test-Path (Join-Path $root 'Documents')) { Copy-Item Documents\Changelog.txt -Destination (Join-Path $root 'Documents') -Force }
+          if (Test-Path (Join-Path $root 'Application-source')) { Copy-Item Application-source\* -Destination (Join-Path $root 'Application-source') -Force }
           Get-ChildItem $root -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
           Compress-Archive -Path (Join-Path $root '*') -DestinationPath "APK-Info-$ver.zip" -Force
           # release notes = newest section of the changelog
