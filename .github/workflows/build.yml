@@ -34,7 +34,7 @@ jobs:
           $au = "${env:ProgramFiles(x86)}\AutoIt3"
           Start-Process "$au\Aut2Exe\Aut2exe.exe" -ArgumentList '/in', 'Application-source\APK-Info.au3', '/out', "$PWD\APK-Info.exe", '/icon', 'Application-source\APK-Info.ico', '/x86', '/nopack' -Wait
           if (!(Test-Path APK-Info.exe)) { Write-Error 'APK-Info.exe not created'; exit 1 }
-          Get-Item APK-Info.exe
+          (Get-Item APK-Info.exe).VersionInfo | Format-List
 
       - name: Assemble full package (over APK-Info 1.35)
         id: pkg
