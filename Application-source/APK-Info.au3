@@ -8,7 +8,6 @@
 #AutoIt3Wrapper_Res_LegalCopyright=zoster
 #AutoIt3Wrapper_Res_Fileversion=1.36.0.0
 #EndRegion ;**** Directives created by AutoIt3Wrapper_GUI ****
-#pragma compile(AutoItExecuteAllowed True)
 #pragma compile(ExecLevel, asInvoker)
 #pragma compile(UPX, False)
 #pragma compile(FileDescription, APK-Info)
