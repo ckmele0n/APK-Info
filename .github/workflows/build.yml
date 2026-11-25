@@ -1,9 +1,16 @@
 name: Build
 
+# Every push compiles APK-Info.exe and builds the full package.
+# On master it also publishes a GitHub release named after $ProgramVersion
+# in APK-Info.au3 (tag "1.36" etc.). If that release already exists,
+# its package is replaced. Bump $ProgramVersion for a new release.
+
 on:
   push:
-    branches-ignore: [master]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -30,24 +37,46 @@ jobs:
           Get-Item APK-Info.exe
 
       - name: Assemble full package (over APK-Info 1.35)
+        id: pkg
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $ver = (Select-String -Path Application-source\APK-Info.au3 -Pattern '^\$ProgramVersion = "(.+)"').Matches[0].Groups[1].Value
+          "version=$ver" >> $env:GITHUB_OUTPUT
           New-Item -ItemType Directory -Force old, pkg | Out-Null
           gh release download 1.35 --repo Enyby/APK-Info --dir old
           Get-ChildItem old
           $zip = Get-ChildItem old -Filter *.zip | Sort-Object Length -Descending | Select-Object -First 1
           if (!$zip) { Write-Error 'No zip in the 1.35 release'; exit 1 }
           Expand-Archive $zip.FullName -DestinationPath pkg
-          # the zip may contain a top folder
           $root = (Get-ChildItem pkg -Recurse -Filter APK-Info.exe | Select-Object -First 1).DirectoryName
-          if (!$root) { $root = 'pkg' }
+          if (!$root) { $root = (Resolve-Path pkg).Path }
           Copy-Item APK-Info.exe, APK-Info.ini, README.md -Destination $root -Force
-          Copy-Item Documents\Changelog.txt -Destination (Join-Path $root 'Documents') -Force -ErrorAction SilentlyContinue
+          if (Test-Path (Join-Path $root 'Documents')) { Copy-Item Documents\Changelog.txt -Destination (Join-Path $root 'Documents') -Force }
           Get-ChildItem $root -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
+          Compress-Archive -Path (Join-Path $root '*') -DestinationPath "APK-Info-$ver.zip" -Force
+          # release notes = newest section of the changelog
+          $log = Get-Content Documents\Changelog.txt -Raw
+          $parts = $log -split '(?m)^\*\*\* '
+          ($parts[1] -split "`n", 2)[1].Trim() | Set-Content notes.md
 
       - uses: actions/upload-artifact@v4
         with:
-          name: APK-Info-1.36
-          path: pkg
+          name: APK-Info-${{ steps.pkg.outputs.version }}
+          path: APK-Info-${{ steps.pkg.outputs.version }}.zip
+
+      - name: Release
+        if: github.ref == 'refs/heads/master'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ver = '${{ steps.pkg.outputs.version }}'
+          gh release view $ver *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $ver "APK-Info-$ver.zip" --clobber
+            gh release edit $ver --notes-file notes.md
+          } else {
+            gh release create $ver "APK-Info-$ver.zip" --target $env:GITHUB_SHA --title "APK-Info $ver" --notes-file notes.md --latest
+          }
