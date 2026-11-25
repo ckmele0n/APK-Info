@@ -6,12 +6,12 @@
 #AutoIt3Wrapper_Res_Comment=Shows info about Android Package Files (APK)
 #AutoIt3Wrapper_Res_Description=APK-Info
 #AutoIt3Wrapper_Res_LegalCopyright=zoster
-#AutoIt3Wrapper_Res_Fileversion=1.35.0.0
+#AutoIt3Wrapper_Res_Fileversion=1.36.0.0
 #EndRegion ;**** Directives created by AutoIt3Wrapper_GUI ****
 #pragma compile(AutoItExecuteAllowed True)
 
-$ProgramVersion = "1.35"
-$ProgramReleaseDate = "03.07.2019"
+$ProgramVersion = "1.36"
+$ProgramReleaseDate = "25.11.2026"
 $ProgramName = 'APK-Info'
 
 #include <Constants.au3>
@@ -198,7 +198,7 @@ $strAndroid = 'Android'
 $strVirusTotal = 'VirusTotal'
 $strAdb = 'ADB'
 
-$urlUpdate = 'https://github.com/Enyby/APK-Info/releases/latest'
+$urlUpdate = 'https://github.com/ckmele0n/APK-Info/releases/latest'
 
 $URLPlayStore = IniRead($IniFile, $LangSection, "URLPlaystore", "https://play.google.com/store/apps/details?id=")
 

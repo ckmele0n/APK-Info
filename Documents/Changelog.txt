@@ -1,6 +1,9 @@
-*** APK-Info 1.35.1 (25.11.2026)
+*** APK-Info 1.36 (25.11.2026)
 
 - Added Android 12L, 13, 14, 15, 16 (API 32-36).
+- Fixed slow loading and hang on "icons..." step.
+- Fixed missing icons for modern APKs (webp, Android 13 themed icons, shortened resource paths).
+- Update check now points to github.com/ckmele0n/APK-Info.
 
 *** APK-Info 1.35 (03.07.2019)
 
