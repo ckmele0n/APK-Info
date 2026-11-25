@@ -29,9 +29,25 @@ jobs:
           if (!(Test-Path APK-Info.exe)) { Write-Error 'APK-Info.exe not created'; exit 1 }
           Get-Item APK-Info.exe
 
+      - name: Assemble full package (over APK-Info 1.35)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force old, pkg | Out-Null
+          gh release download 1.35 --repo Enyby/APK-Info --dir old
+          Get-ChildItem old
+          $zip = Get-ChildItem old -Filter *.zip | Sort-Object Length -Descending | Select-Object -First 1
+          if (!$zip) { Write-Error 'No zip in the 1.35 release'; exit 1 }
+          Expand-Archive $zip.FullName -DestinationPath pkg
+          # the zip may contain a top folder
+          $root = (Get-ChildItem pkg -Recurse -Filter APK-Info.exe | Select-Object -First 1).DirectoryName
+          if (!$root) { $root = 'pkg' }
+          Copy-Item APK-Info.exe, APK-Info.ini, README.md -Destination $root -Force
+          Copy-Item Documents\Changelog.txt -Destination (Join-Path $root 'Documents') -Force -ErrorAction SilentlyContinue
+          Get-ChildItem $root -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
+
       - uses: actions/upload-artifact@v4
         with:
-          name: APK-Info
-          path: |
-            APK-Info.exe
-            APK-Info.ini
+          name: APK-Info-1.36
+          path: pkg
