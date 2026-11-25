@@ -110,6 +110,11 @@ Level 28 = Pie
 Level 29 = 10
 Level 30 = 11
 Level 31 = 12
+Level 32 = 12L
+Level 33 = 13 Tiramisu
+Level 34 = 14 Upside Down Cake
+Level 35 = 15 Vanilla Ice Cream
+Level 36 = 16 Baklava
 ```
 
 # Additional info
