@@ -1,3 +1,7 @@
+*** APK-Info 1.35.1 (25.11.2026)
+
+- Added Android 12L, 13, 14, 15, 16 (API 32-36).
+
 *** APK-Info 1.35 (03.07.2019)
 
 - Revert bugged aapt binary.
