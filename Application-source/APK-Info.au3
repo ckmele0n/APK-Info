@@ -11,15 +11,14 @@
 #pragma compile(AutoItExecuteAllowed True)
 #pragma compile(ExecLevel, asInvoker)
 #pragma compile(UPX, False)
-#pragma compile(FileDescription, APK-Info - shows info about Android Package Files (APK))
+#pragma compile(FileDescription, APK-Info)
 #pragma compile(ProductName, APK-Info)
 #pragma compile(ProductVersion, 1.36)
 #pragma compile(FileVersion, 1.36.0.0)
 #pragma compile(InternalName, APK-Info)
 #pragma compile(OriginalFilename, APK-Info.exe)
 #pragma compile(CompanyName, APK-Info project)
-#pragma compile(LegalCopyright, zoster; ckmele0n)
-#pragma compile(Comments, https://github.com/ckmele0n/APK-Info)
+#pragma compile(LegalCopyright, zoster and ckmele0n)
 
 $ProgramVersion = "1.36"
 $ProgramReleaseDate = "25.11.2026"
